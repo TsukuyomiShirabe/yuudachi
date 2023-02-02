@@ -114,6 +114,9 @@ const playstationMarkerMap = {
   [headmarkers.firechainSquare]: 'square',
   [headmarkers.firechainX]: 'cross',
 };
+const playstationMarkerEnum = {
+  'circle': 1, 'cross': 2, 'triangle': 3, 'square': 4
+};
 const firstMarker = parseInt('0017', 16);
 const getHeadmarkerId = (data, matches) => {
   if (data.decOffset === undefined)
@@ -131,11 +134,16 @@ Options.Triggers.push({
   initData: () => {
     return {
       playerOrder: [],
+
       synergyMarker: {},
-      synergyFlag: false,
-      synergyTransformTriggerOn: moreLogLineActivated,
+      synergyGlitch: null,
+      synergyTransformFlag: false,
+      synergyTransformTriggerOn: cactbotSelfDllActivated,
       synergyTransformed: { m: false, f: false },
       synergyTransformOmegaFId: null,
+      synergySpotlightFlag: false,
+      synergySpotlightGroup: {},
+      synergySpotlightMarkerPlayers: [],
     };
   },
 
@@ -146,7 +154,8 @@ Options.Triggers.push({
       // Initialize at 7B03 = Program Loop
       netRegex: { id: ['7B03'], source: 'Omega', capture: false },
       run: (data) => {
-        if (data.playerOrder.length != 8) data.playerOrder = initPlayerOrder(data);
+        // if (data.playerOrder.length != 8)
+        data.playerOrder = initPlayerOrder(data);
         console.log(data.playerOrder);
       }
     },
@@ -157,7 +166,7 @@ Options.Triggers.push({
       // D64 = Remote Glitch
       netRegex: { effectId: ['D63', 'D64'] },
       suppressSeconds: 10,
-      run: (data, matches) => data.glitch = matches.effectId === 'D63' ? 'mid' : 'remote',
+      run: (data, matches) => data.synergyGlitch = matches.effectId === 'D63' ? 'mid' : 'remote',
     },
     {
       id: 'TOP Party Synergy Marker Collect',
@@ -169,23 +178,39 @@ Options.Triggers.push({
         if (marker === undefined)
           return;
         data.synergyMarker[matches.target] = marker;
+        // console.log(Object.values(data.synergyMarker));
       },
     },
     {
-      id: 'TOP Party Synergy Marker',
+      id: 'TOP Party Synergy Marker & Glitch Spread',
       type: 'GainsEffect',
       // In practice, glitch1 glitch2 marker1 marker2 glitch3 glitch4 etc ordering.
-      netRegex: { effectId: ['D63', 'D64'], capture: false },
-      delaySeconds: 7, // 0.5;
+      netRegex: { effectId: ['D63', 'D64'] },
+      delaySeconds: 5, // 0.5;
       durationSeconds: 8, // 14;
-      suppressSeconds: 10,
+      suppressSeconds: 10, // Only Process Once
       alarmText: (data, _matches, output) => {
-        const glitch = data.glitch
+        const glitch = data.synergyGlitch
           ? {
             mid: output.midGlitch(),
             remote: output.remoteGlitch(),
-          }[data.glitch]
+          }[data.synergyGlitch]
           : output.unknown();
+        // console.log(Object.keys(data.synergyMarker));
+        // console.log(Object.values(data.synergyMarker));
+        
+        // Initialize Group for Spotlight
+        var markerInLeftGroup = [];
+        for (const [name, marker] of Object.entries(data.synergyMarker)) {
+          if (!markerInLeftGroup.includes(marker)) {
+            markerInLeftGroup.push(marker);
+            data.synergySpotlightGroup[name] = 'left';
+          } else {
+            data.synergySpotlightGroup[name] = 'right';
+          }
+        }
+
+        // Dealing with Glitch Spread
         const myMarker = data.synergyMarker[data.me];
         // If something has gone awry, at least return something here.
         if (myMarker === undefined)
@@ -196,9 +221,9 @@ Options.Triggers.push({
           if (marker === myMarker && name !== data.me) { partner = name; break; }
         }
 
-        var partnerIndex = data.playerOrder.indexOf[partner];
-        var myIndex = data.playerOrder.indexOf[data.me];
-        var direction = (myIndex < partner) ? output.goLeft() : output.goRight();
+        var partnerIndex = data.playerOrder.indexOf(partner);
+        var myIndex = data.playerOrder.indexOf(data.me);
+        var direction = (myIndex < partnerIndex) ? output.goLeft() : output.goRight();
 
         return {
           circle: output.circle({ glitch: glitch, direction: direction }),
@@ -222,19 +247,107 @@ Options.Triggers.push({
         },
         circle: {
           // cn: '${glitch} 圆圈 ${direction}',
-          cn: '${glitch} 1 ${direction}',
+          cn: '${glitch} 1 圆圈 ${direction}',
         },
         cross: {
           // cn: '${glitch} 叉字 ${direction}',
-          cn: '${glitch} 2 ${direction}',
+          cn: '${glitch} 2 叉字 ${direction}',
         },
         triangle: {
           // cn: '${glitch} 三角 ${direction}',
-          cn: '${glitch} 3 ${direction}',
+          cn: '${glitch} 3 三角 ${direction}',
         },
         square: {
           // cn: '${glitch} 方形 ${direction}',
-          cn: '${glitch} 4 ${direction}',
+          cn: '${glitch} 4 方形 ${direction}',
+        },
+        unknown: Outputs.unknown,
+      },
+    },
+    {
+      id: 'TOP Party Synergy Spotlight Stack Markers',
+      type: 'HeadMarker',
+      netRegex: {},
+      condition: (data, matches) => {
+        var isStack = (getHeadmarkerId(data, matches) === headmarkers.stack);
+        return (!data.synergySpotlightFlag && isStack);
+      },
+      preRun: (data, matches) => {
+        data.synergySpotlightMarkerPlayers.push(matches.target);
+      },
+    },
+    {
+      id: 'TOP Party Synergy Spotlight Marker Switch',
+      type: 'HeadMarker',
+      netRegex: {},
+      condition: (data, matches) => {
+        var isStack = (getHeadmarkerId(data, matches) === headmarkers.stack);
+        return (!data.synergySpotlightFlag && isStack);
+      },
+      delaySeconds: 1,
+      alarmText: (data, _matches, output) => {
+        const glitch = data.synergyGlitch
+          ? {
+            mid: output.midGlitch(),
+            remote: output.remoteGlitch(),
+          }[data.synergyGlitch]
+          : output.unknown();
+        
+        // There should be exactly 2 player in data.synergySpotlightMarkerPlayers
+        const markerPlayers = data.synergySpotlightMarkerPlayers;
+        if (markerPlayers.length != 2) return output.unknown();
+
+        var mp0 = markerPlayers[0];
+        var mp1 = markerPlayers[1];
+        var me0 = playstationMarkerEnum[data.synergyMarker[mp0]];
+        var me1 = playstationMarkerEnum[data.synergyMarker[mp1]];
+        if (data.synergySpotlightGroup[mp0] === data.synergySpotlightGroup[mp1]) {
+          // If right group, the enumeration order is reversed.
+          var reverseEnum = (data.synergySpotlightGroup[mp0] === 'right' && data.synergyGlitch === 'remote');
+          var switchPlayerMarker = ((me0 > me1) != reverseEnum) ? mp0 : mp1;
+          var switchPlayerNoMarker = null;
+          for (const [name, marker] of Object.entries(data.synergyMarker)) {
+            if (marker === switchPlayerMarker && name !== switchPlayerMarker) {
+              switchPlayerNoMarker = name;
+              break;
+            }
+          }
+          if (switchPlayerNoMarker === null) return output.switchNothing({ glitch: glitch });
+
+          var switchMarkerShape = data.synergyMarker[mp0];
+          return {
+            circle: output.switchCircle({ glitch: glitch }),
+            triangle: output.switchTriangle({ glitch: glitch }),
+            square: output.switchSquare({ glitch: glitch }),
+            cross: output.switchCross({ glitch: glitch }),
+          }[switchMarkerShape];
+        }
+        return output.switchNothing({ glitch: glitch });
+      },
+      run: (data) => {
+        data.synergySpotlightFlag = true;
+      },
+      outputStrings: {
+        midGlitch: {
+          cn: '中间',
+        },
+        remoteGlitch: {
+          cn: '远离',
+        },
+        switchCircle: {
+          cn: '${glitch} 圆圈交换',
+        },
+        switchCross: {
+          cn: '${glitch} 叉字交换',
+        },
+        switchTriangle: {
+          cn: '${glitch} 三角交换',
+        },
+        switchSquare: {
+          cn: '${glitch} 方形交换',
+        },
+        switchNothing: {
+          cm: '${glitch}'
         },
         unknown: Outputs.unknown,
       },
@@ -245,7 +358,7 @@ Options.Triggers.push({
       netRegex: { npcNameId:'7634' }, // ID of BUNSHIN Omega-F
       // type: 'StartsUsing',
       // netRegex: { id: ['7B3E', '7B3F'], source: ['Omega', 'Omega-M', 'Omega-F'] },
-      condition: (data) => data.synergyTransformTriggerOn,
+      condition: (data) => { return (!data.synergyTransformFlag && data.synergyTransformTriggerOn) },
       preRun: (data, matches) => {
         data.synergyTransformOmegaFId = matches.id;
       },
@@ -254,10 +367,11 @@ Options.Triggers.push({
       // 8s later, BUNSHINs show up and their forms are determined.
       // Then 4s later, 2 of BUNSHINs (1 M and 1 F) start casting AOEs.
       // Then 1s later, AOEs take their effects.
-      delaySeconds: 9.5,
-      suppressSeconds: 10,
+      delaySeconds: 9,
+      suppressSeconds: 30,
       alarmText: (data, _mathces, output) => {
         // Alarm according to data.synergyTransformed
+        if (data.synergyTransformFlag) return '';
         if (data.synergyTransformed.m) {
           if (data.synergyTransformed.f) { return output.mCenter(); }
           else { return output.mSide(); }
@@ -287,7 +401,7 @@ Options.Triggers.push({
       // netRegex: /^.{14} (?:\w+ )00:0:106:(?<id>[^:]*):(?<source>[^:]*):0031:.{4}:.{8}:/,
       // This is compatible.
       netRegex: /] ChatLog 00:0:106:(?<id>[^:]*):(?<sourceRaw>[^:]*):0031:.{4}:.{8}:/,
-      condition: (data) => { return (!data.synergyFlag && data.synergyTransformTriggerOn) },
+      condition: (data) => { return (!data.synergyTransformFlag && data.synergyTransformTriggerOn) },
       preRun: (data, matches) => {
         // DEBUG: Check by data.source
         const nameLocale = {
@@ -303,10 +417,9 @@ Options.Triggers.push({
         // if (matches.id === data.synergyTransformOmegaFId) { data.synergyTransformed.f = true; }
         // else { data.synergyTransformed.m = true; }
       },
-      delaySeconds: 10,
-      run: (data) => { data.synergyFlag = true; }, // Clean up
+      delaySeconds: 15,
+      run: (data) => { data.synergyTransformFlag = true; }, // Clean up
     },
-
   ],
 
   timelineReplace: [
