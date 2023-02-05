@@ -347,7 +347,7 @@ Options.Triggers.push({
           cn: '${glitch} 方形交换',
         },
         switchNothing: {
-          cm: '${glitch}'
+          cn: '${glitch}'
         },
         unknown: Outputs.unknown,
       },
@@ -371,7 +371,7 @@ Options.Triggers.push({
       suppressSeconds: 30,
       alarmText: (data, _mathces, output) => {
         // Alarm according to data.synergyTransformed
-        if (data.synergyTransformFlag) return '';
+        if (data.synergyTransformFlag) return output.unknown;
         if (data.synergyTransformed.m) {
           if (data.synergyTransformed.f) { return output.mCenter(); }
           else { return output.mSide(); }
@@ -392,7 +392,8 @@ Options.Triggers.push({
         },
         mfAway: {
           cn: '远离男女',
-        }
+        },
+        unknown: Outputs.unknown,
       },
     },
     {
