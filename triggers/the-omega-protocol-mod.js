@@ -1,8 +1,7 @@
 // The Omega Protocol
 //   modified by Shirabe Tsuku-yomi @ Titan
 
-const orderMode = 'htdh'; // 'htdh' or 'htd'
-const cactbotSelfDllActivated = true; // A special addon for ACT
+const cactbotSelfDllActivated = true; // A special addon for ACT, may be deprecated
 
 const jobText = {
   // Tank
@@ -50,7 +49,7 @@ const jobOrderByRole = {
 };
 
 // Different Player Order Solution
-function initPlayerOrder(data) {
+function initPlayerOrderByRole(data) {
   var playerOrderByRole = { healer: [], tank: [], dps: [] };
   var partyJobs = {};
   
@@ -70,17 +69,25 @@ function initPlayerOrder(data) {
       }
     )
   }
+  return playerOrderByRole;
+};
 
-  switch (orderMode) {
-  case 'htdh':
-    return playerOrderByRole.healer.slice(0,1).concat(
-      playerOrderByRole.tank, playerOrderByRole.dps, playerOrderByRole.healer.slice(1)
-    );
-  case 'htd':
-    return playerOrderByRole.healer.concat(
-      playerOrderByRole.tank, playerOrderByRole.dps
-    );
-  }
+function htdhOrder(playerOrderByRole) {
+  return playerOrderByRole.healer.slice(0,1).concat(
+    playerOrderByRole.tank, playerOrderByRole.dps, playerOrderByRole.healer.slice(1)
+  );
+};
+
+function htdOrder(playerOrderByRole) {
+  return playerOrderByRole.healer.concat(
+    playerOrderByRole.tank, playerOrderByRole.dps
+  );
+};
+
+function tdhOrder(playerOrderByRole) {
+  return playerOrderByRole.tank.concat(
+    playerOrderByRole.dps, playerOrderByRole.healer
+  );
 };
 
 const playstationMarkers = ['circle', 'cross', 'triangle', 'square'];
@@ -134,7 +141,7 @@ Options.Triggers.push({
   initData: () => {
     return {
       playerOrder: [],
-
+      // P2 Party Synergy
       synergyMarker: {},
       synergyGlitch: null,
       synergyTransformFlag: false,
@@ -144,6 +151,12 @@ Options.Triggers.push({
       synergySpotlightFlag: false,
       synergySpotlightGroup: {},
       synergySpotlightMarkerPlayers: [],
+      // P3 Hello World
+      smellDefamation: [],
+      smellRot: {},
+      // P3 Oversampled Wave Cannon
+      omegaWaveCannonDirection: null,
+      waveCannonLoadingPlayer: [],
     };
   },
 
@@ -155,8 +168,7 @@ Options.Triggers.push({
       netRegex: { id: ['7B03'], source: 'Omega', capture: false },
       run: (data) => {
         // if (data.playerOrder.length != 8)
-        data.playerOrder = initPlayerOrder(data);
-        console.log(data.playerOrder);
+        data.playerOrderByRole = initPlayerOrderByRole(data);
       }
     },
     {
@@ -198,6 +210,7 @@ Options.Triggers.push({
           : output.unknown();
         // console.log(Object.keys(data.synergyMarker));
         // console.log(Object.values(data.synergyMarker));
+        var playerOrder = htdhOrder(data.playerOrderByRole);
         
         // Initialize Group for Spotlight
         var markerInLeftGroup = [];
@@ -221,8 +234,8 @@ Options.Triggers.push({
           if (marker === myMarker && name !== data.me) { partner = name; break; }
         }
 
-        var partnerIndex = data.playerOrder.indexOf(partner);
-        var myIndex = data.playerOrder.indexOf(data.me);
+        var partnerIndex = playerOrder.indexOf(partner);
+        var myIndex = playerOrder.indexOf(data.me);
         var direction = (myIndex < partnerIndex) ? output.goLeft() : output.goRight();
 
         return {
@@ -301,6 +314,7 @@ Options.Triggers.push({
         var mp1 = markerPlayers[1];
         var me0 = playstationMarkerEnum[data.synergyMarker[mp0]];
         var me1 = playstationMarkerEnum[data.synergyMarker[mp1]];
+        console.log(mp0, mp1);
         if (data.synergySpotlightGroup[mp0] === data.synergySpotlightGroup[mp1]) {
           // If right group, the enumeration order is reversed.
           var reverseEnum = (data.synergySpotlightGroup[mp0] === 'right' && data.synergyGlitch === 'remote');
@@ -315,6 +329,7 @@ Options.Triggers.push({
           if (switchPlayerNoMarker === null) return output.switchNothing({ glitch: glitch });
 
           var switchMarkerShape = data.synergyMarker[mp0];
+          console.log(switchMarkerShape, switchPlayerMarker, switchPlayerNoMarker);
           return {
             circle: output.switchCircle({ glitch: glitch }),
             triangle: output.switchTriangle({ glitch: glitch }),
@@ -353,11 +368,94 @@ Options.Triggers.push({
       },
     },
     {
-      id: 'TOP Party Synergy Omega M & F',
+      id: 'TOP Party Synergy Omega M & F (Overlay)',
+      type: 'AddedCombatant',
+      type: 'Ability',
+      netRegex: { id: '7B3E', source: 'Omega', capture: false },
+      // Untargetable 3s after this, things appear ~2 after this, 2.5 for safety.
+      delaySeconds: 6,
+      promise: async (data) => {
+        data.combatantData = [];
+        // TODO: filter this by the combatants added right before Party Synergy???
+        data.combatantData = (await callOverlayHandler({
+          call: 'getCombatants',
+        })).combatants;
+        console.log(JSON.stringify(data.combatantData));
+      },
+      alertText: (data, _matches, output) => {
+        const omegaMNPCId = 15714;
+        const omegaFNPCId = 15715;
+        let countM = 0;
+        let countF = 0;
+        let isFIn = false;
+        let isMIn = false;
+        for (const c of data.combatantData) {
+          if (c.BNpcID === omegaMNPCId) {
+            countM++;
+            console.log(`M=${countM}`)
+            // console.log(c.WeaponId);
+            if (c.WeaponId === 4)
+              isMIn = true;
+          }
+          if (c.BNpcID === omegaFNPCId) {
+            countF++;
+            console.log(`F=${countF}`);
+            // console.log(c.WeaponId);
+            if (c.WeaponId === 4)
+              isFIn = true;
+          }
+        }
+        if (countM === 0 || countF === 0) {
+          // console.error(`PartySynergy: missing m/f: ${JSON.stringify(data.combatantData)}`);
+          return;
+        }
+        if (isFIn && isMIn)
+          console.log('靠近男人');
+        if (isFIn && !isMIn)
+          console.log('靠近女人');
+        if (!isFIn && isMIn)
+          console.log('男人两边');
+        if (!isFIn && !isMIn)
+          console.log('远离男女');
+        // if (isFIn && isMIn)
+        //   return output.superliminalStrength();
+        // if (isFIn && !isMIn)
+        //   return output.superliminalBladework();
+        // if (!isFIn && isMIn)
+        //   return output.blizzardStrength();
+        // if (!isFIn && !isMIn)
+        //   return output.blizzardBladework();
+      },
+      // outputStrings: {
+      //   blizzardBladework: {
+      //     en: 'Out Out',
+      //     de: 'Raus Raus',
+      //     cn: '远离男女',
+      //   },
+      //   superliminalStrength: {
+      //     en: 'In In on M',
+      //     de: 'Rein Rein auf M',
+      //     cn: '靠近男人',
+      //   },
+      //   superliminalBladework: {
+      //     en: 'Under F',
+      //     de: 'Unter W',
+      //     cn: '靠近女人',
+      //   },
+      //   blizzardStrength: {
+      //     en: 'M Sides',
+      //     de: 'Seitlich von M',
+      //     cn: '男人两边',
+      //   },
+      // },
+    },
+    {
+      id: 'TOP Party Synergy Omega M & F (CactbotSelf)',
       type: 'AddedCombatant',
       netRegex: { npcNameId:'7634' }, // ID of BUNSHIN Omega-F
       // type: 'StartsUsing',
       // netRegex: { id: ['7B3E', '7B3F'], source: ['Omega', 'Omega-M', 'Omega-F'] },
+      disable: true,
       condition: (data) => { return (!data.synergyTransformFlag && data.synergyTransformTriggerOn) },
       preRun: (data, matches) => {
         data.synergyTransformOmegaFId = matches.id;
@@ -382,26 +480,27 @@ Options.Triggers.push({
       },
       outputStrings: {
         mCenter: {
-          cn: '靠近男人',
+          cn: '靠近男人', // = superliminalStrength
         },
         fCenter: {
-          cn: '靠近女人',
+          cn: '靠近女人', // = superliminalBladework
         },
         mSide: {
-          cn: '男人两边',
+          cn: '男人两边', // = blizzardStrength
         },
         mfAway: {
-          cn: '远离男女',
+          cn: '远离男女', // = blizzardBladework
         },
         unknown: Outputs.unknown,
       },
     },
     {
-      id: 'TOP Party Synergy Omega M & F Transform',
+      id: 'TOP Party Synergy Omega M & F Transform (CactbotSelf)',
       // This NetRegex is not compatible with CACTBOTSELF.DLL.
       // netRegex: /^.{14} (?:\w+ )00:0:106:(?<id>[^:]*):(?<source>[^:]*):0031:.{4}:.{8}:/,
       // This is compatible.
       netRegex: /] ChatLog 00:0:106:(?<id>[^:]*):(?<sourceRaw>[^:]*):0031:.{4}:.{8}:/,
+      disable: true,
       condition: (data) => { return (!data.synergyTransformFlag && data.synergyTransformTriggerOn) },
       preRun: (data, matches) => {
         // DEBUG: Check by data.source
@@ -421,6 +520,299 @@ Options.Triggers.push({
       delaySeconds: 15,
       run: (data) => { data.synergyTransformFlag = true; }, // Clean up
     },
+    {
+      id: 'TOP Code Smell Collector',
+      type: 'GainsEffect',
+      // D6C Synchronization Code Smell (stack)
+      // D6D Overflow Code Smell (defamation)
+      // D6E Underflow Code Smell (red)
+      // D6F Performance Code Smell (blue)
+      // D71 Remote Code Smell (far tethers)
+      // DAF Local Code Smell (near tethers)
+      // DC9 Local Regression (near tethers)
+      // DCA Remote Regression (far tethers)
+      // DC4 Critical Synchronization Bug (stack)
+      // DC5 Critical Overflow Bug (defamation)
+      // DC6 Critical Underflow Bug (red)
+      // D65 Critical Performance Bug (blue)
+      netRegex: { effectId: ['D6D', 'D6E', 'D6F'] },
+      run: (data, matches) => {
+        const isDefamation = matches.effectId === 'D6D';
+        const isRed = matches.effectId === 'D6E';
+        const isBlue = matches.effectId === 'D6F';
+        if (isDefamation)
+          data.smellDefamation.push(matches.target);
+        else if (isRed)
+          data.smellRot[matches.target] = 'red';
+        else if (isBlue)
+          data.smellRot[matches.target] = 'blue';
+      },
+    },
+    {
+      id: 'TOP Code Smell Defamation Color',
+      type: 'GainsEffect',
+      netRegex: { effectId: 'D6D', capture: false },
+      delaySeconds: 0.5,
+      suppressSeconds: 1,
+      alertText: (data, _matches, output) => {
+        let rotColor;
+        if (data.smellDefamation.length !== 2) {
+          console.error(
+            `Defamation: missing person: ${JSON.stringify(data.smellDefamation)}, ${
+              JSON.stringify(data.smellRot)
+            }`,
+          );
+        }
+        for (const target of data.smellDefamation) {
+          const color = data.smellRot[target];
+          if (color === undefined) {
+            console.error(
+              `Defamation: missing color: ${JSON.stringify(data.smellDefamation)}, ${
+                JSON.stringify(data.smellRot)
+              }`,
+            );
+            continue;
+          }
+          if (rotColor === undefined) {
+            rotColor = color;
+            continue;
+          }
+          if (rotColor !== color) {
+            console.error(
+              `Defamation: conflicting color: ${JSON.stringify(data.smellDefamation)}, ${
+                JSON.stringify(data.smellRot)
+              }`,
+            );
+            rotColor = undefined;
+            break;
+          }
+        }
+        data.defamationColor = rotColor;
+        if (rotColor === 'red')
+          return output.red();
+        else if (rotColor === 'blue')
+          return output.blue();
+        return output.unknown();
+      },
+      outputStrings: {
+        red: {
+          en: 'Red Defamation',
+          de: 'Rote Ehrenstrafe',
+          ko: '빨강 광역',
+          cn: '红色大圈',
+        },
+        blue: {
+          en: 'Blue Defamation',
+          de: 'Blaue Ehrenstrafe',
+          ko: '파랑 광역',
+          cn: '蓝色大圈',
+        },
+        unknown: {
+          en: '??? Defamation',
+          de: '??? Ehrenstrafe',
+          ko: '??? 광역',
+          cn: '??? 大圈',
+        },
+      },
+    },
+    {
+      id: 'TOP Oversampled Wave Cannon Direction',
+      type: 'StartsUsing',
+      netRegex: { id: ['7B6B', '7B6C'], source: 'Omega' },
+      preRun: (data, matches, output) => {
+        const abilityId = matches.id;
+        if (abilityId === '7B6B') 
+          data.omegaWaveCannonDirection = 'east';
+        else if (abilityId === '7B6C')
+          data.omegaWaveCannonDirection = 'west';
+      },
+      alarmText: (data, matches, output) => {
+        // Strategy: https://www.bilibili.com/video/BV1gA411C7xC/
+        const abilityId = matches.id;
+        if (abilityId == '7B6B')
+          return output.waveCannon({ dir: output.east() });
+        else if (abilityId == '7B6C')
+          return output.waveCannon({ dir: output.west() });
+        else
+          return output.unknown();
+      },
+      outputStrings: {
+        east: Outputs.east,
+        west: Outputs.west,
+        waveCannon: {
+          cn: '波动炮打${dir}'
+        },
+        unknown: Outputs.unknown,
+      },
+    },
+    {
+      id: 'TOP Oversampled Wave Cannon Loading Collect',
+      type: 'GainsEffect',
+      netRegex: { effectId: ['D7C', 'D7D'] },
+      run: (data, matches) => {
+        data.waveCannonLoadingPlayer.push(matches.target);
+      },
+    },
+    // {
+    //   id: 'TOP Oversampled Wave Cannon (Bilibili Strat)',
+    //   type: 'GainsEffect',
+    //   netRegex: { effectId: ['D7C', 'D7D'] },
+    //   delaySeconds: 1.0,
+    //   suppressSeconds: 10.0,
+    //   alarmText: (data, matches, output) => {
+    //     // Strategy: https://www.bilibili.com/video/BV1gA411C7xC/
+    //     //
+    //     // Waymark:
+    //     //     A
+    //     //   4   1
+    //     // D       B
+    //     //   3   2
+    //     //     C
+    //     //
+    //     // B: descend order, D: ascend order
+    //     var playerOrder = tdhOrder(data.playerOrderByRole);
+    //     var waymark = null;
+
+    //     if (data.waveCannonLoadingPlayer.includes(data.me)) {
+    //       var selectedPlayerOrder = [];
+    //       if (data.omegaWaveCannonDirection === 'east')
+    //         playerOrder.reverse();
+    //       for (const player of playerOrder) {
+    //         if (data.waveCannonLoadingPlayer.includes(player))
+    //           selectedPlayerOrder.push(player);
+    //       }
+    //       var myIndex = selectedPlayerOrder.indexOf(data.me);
+    //       if (data.omegaWaveCannonDirection === 'east') {
+    //         switch (myIndex) {
+    //         case 0:
+    //           waymark = output.waymark1(); break;
+    //         case 1:
+    //           waymark = output.waymark2(); break;
+    //         case 2:
+    //           waymark = output.waymark3(); break;
+    //         }
+    //       }
+    //       else {
+    //         switch (myIndex) {
+    //         case 0:
+    //           waymark = output.waymark3(); break;
+    //         case 1:
+    //           waymark = output.waymark4(); break;
+    //         case 2:
+    //           waymark = output.waymark1(); break;
+    //         }
+    //       }
+    //       return output.loadingOnMe({ waymark: waymark });
+    //     }
+    //     else {
+    //       var unselectedPlayerOrder = [];
+    //       var northMost = null;
+    //       if (data.omegaWaveCannonDirection === 'east')
+    //         playerOrder.reverse();
+    //       for (const player of playerOrder) {
+    //         if (!data.waveCannonLoadingPlayer.includes(player))
+    //           unselectedPlayerOrder.push(player);
+    //       }
+
+    //       if (data.omegaWaveCannonDirection === 'east')
+    //         northMost = unselectedPlayerOrder.shift();
+    //       else
+    //         northMost = unselectedPlayerOrder.pop();
+    //       if (northMost === data.me) {
+    //         waymark = (data.omegaWaveCannonDirection === 'east') ?
+    //           output.waymarkD() : output.waymarkB();
+    //       }
+    //       else {
+    //         if (data.omegaWaveCannonDirection === 'east') {
+    //           switch (myIndex) {
+    //           case 0:
+    //             waymark = output.waymarkA(); break;
+    //           case 1:
+    //             waymark = output.waymark4(); break;
+    //           case 2:
+    //             waymark = output.waymarkD(); break;
+    //           case 3:
+    //             waymark = output.waymarkC(); break;
+    //           }
+    //         }
+    //         else {
+    //           switch (myIndex) {
+    //           case 0:
+    //             waymark = output.waymarkC(); break;
+    //           case 1:
+    //             waymark = output.waymark2(); break;
+    //           case 2:
+    //             waymark = output.waymarkB(); break;
+    //           case 3:
+    //             waymark = output.waymarkA(); break;
+    //           }
+    //         }
+    //       }
+    //       return output.loadingNotOnMe({ waymark: waymark });
+    //     }
+    //   },
+    //   outputStrings: {
+    //     loadingOnMe: {
+    //       cn: '波动炮点名 去${waymark}',
+    //     },
+    //     loadingNotOnMe: {
+    //       cn: '去${waymark}',
+    //     },
+    //     goFar: {
+    //       cn: '去${waymark}外侧'
+    //     },
+    //     waymarkA: { cn: 'A', },
+    //     waymarkB: { cn: 'Boy', },
+    //     waymarkC: { cn: 'C', },
+    //     waymarkD: { cn: 'Dog', },
+    //     waymark1: { cn: '1', },
+    //     waymark2: { cn: '2', },
+    //     waymark3: { cn: '3', },
+    //     waymark4: { cn: '4', },
+    //     unknown: Outputs.unknown,
+    //   },
+    // }
+    {
+      id: 'TOP Oversampled Wave Cannon (Akito Strat)',
+      type: 'GainsEffect',
+      netRegex: { effectId: ['D7C', 'D7D'] },
+      delaySeconds: 1.0,
+      suppressSeconds: 10.0,
+      alarmText: (data, matches, output) => {
+        var playerOrder = tdhOrder(data.playerOrderByRole);
+        var myOrder = null;
+
+        if (data.waveCannonLoadingPlayer.includes(data.me)) {
+          var selectedPlayerOrder = [];
+          for (const player of playerOrder) {
+            if (data.waveCannonLoadingPlayer.includes(player))
+              selectedPlayerOrder.push(player);
+          }
+          var myIndex = selectedPlayerOrder.indexOf(data.me);
+          myOrder = myIndex+1;
+          return output.loadingOnMe({ order: myOrder });
+        }
+        else {
+          var unselectedPlayerOrder = [];
+          for (const player of playerOrder) {
+            if (!data.waveCannonLoadingPlayer.includes(player))
+              unselectedPlayerOrder.push(player);
+          }
+          var myIndex = selectedPlayerOrder.indexOf(data.me);
+          myOrder = myIndex+1;
+          return output.loadingNotOnMe({ order: myOrder });
+        }
+      },
+      outputStrings: {
+        loadingOnMe: {
+          cn: '波动炮点名 ${order}',
+        },
+        loadingNotOnMe: {
+          cn: '无点名 ${order}',
+        },
+        unknown: Outputs.unknown,
+      },
+    }
   ],
 
   timelineReplace: [
